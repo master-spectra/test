@@ -63,10 +63,17 @@ class MeleeAgent(BaseAgent):
     def get_reward(self, game_state):
         reward = 0
         # Награда за нанесение урона врагу
-        reward += (100 - game_state.enemy_base_health) * 0.1
+        reward += (100 - game_state.enemy_base_health) * 0.2
         # Награда за близость к врагу
         closest_enemy = min([self.distance(game_state.robot_positions[0], enemy) for enemy in game_state.enemy_positions])
-        reward += (1 / closest_enemy) * 10
+        reward += (1 / (closest_enemy + 1)) * 15
+        # Штраф за получение урона
+        reward -= (100 - game_state.robot_health[0]) * 0.1
+        # Награда за сбор ресурсов
+        reward += game_state.collected_resources * 0.5
+        # Награда за защиту базы
+        if self.is_base_under_attack(game_state):
+            reward += 10
         return reward
 
     @staticmethod

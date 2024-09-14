@@ -6,7 +6,7 @@ class BaseAgent:
         self.state_size = state_size
         self.action_size = action_size
         self.actions = actions  # Добавляем список действий
-        self.q_table = np.zeros((state_size, action_size))
+        self.q_table = np.zeros((state_size ** len(actions), action_size))
         self.learning_rate = 0.1
         self.discount_factor = 0.95
         self.epsilon = 1.0
@@ -14,19 +14,29 @@ class BaseAgent:
         self.epsilon_min = 0.01
 
     def get_action(self, state):
+        if isinstance(state, int):
+            state_index = state
+        else:
+            state_index = self.state_to_index(state)
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        return np.argmax(self.q_table[state])
+        return np.argmax(self.q_table[state_index])
 
     def train(self, state, action, reward, next_state, done):
+        state_index = self.state_to_index(state)
+        next_state_index = self.state_to_index(next_state)
         target = reward
         if not done:
-            target = reward + self.discount_factor * np.amax(self.q_table[next_state])
+            target = reward + self.discount_factor * np.amax(self.q_table[next_state_index])
 
-        self.q_table[state, action] += self.learning_rate * (target - self.q_table[state, action])
+        self.q_table[state_index, action] += self.learning_rate * (target - self.q_table[state_index, action])
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+
+    def state_to_index(self, state):
+        index = sum(v * (self.state_size ** i) for i, v in enumerate(state))
+        return index % (self.state_size ** len(state))
 
     def get_state(self, game_state):
         # Преобразование game_state в индекс состояния
