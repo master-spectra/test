@@ -13,8 +13,8 @@ class RangedAgent(BaseAgent):
             return action
         return self.model.act(state)  # Если не атака и не отступление, выбираем новое действие
 
-    def train(self, batch_size):
-        self.model.train(batch_size)
+    def train(self, states, actions, rewards, next_states, dones):
+        self.model.train(states, actions, rewards, next_states, dones)
 
     def get_reward(self, game_state):
         reward = 0

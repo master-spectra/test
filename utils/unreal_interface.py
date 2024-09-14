@@ -42,3 +42,16 @@ class UnrealInterface:
     def _get_actor_positions(actor_class):
         actors = unreal.GameplayStatics.get_all_actors_of_class(unreal.EditorLevelLibrary.get_editor_world(), getattr(unreal, actor_class))
         return [actor.get_actor_location() for actor in actors]
+
+    @staticmethod
+    def perform_base_action(action):
+        # Реализация действий базы
+        base = unreal.GameplayStatics.get_actor_of_class(unreal.EditorLevelLibrary.get_editor_world(), unreal.PlayerBase)
+        if action == 0:
+            base.create_melee_robot()
+        elif action == 1:
+            base.create_ranged_robot()
+        elif action == 2:
+            base.create_tank_robot()
+        elif action == 3:
+            base.create_scout_robot()

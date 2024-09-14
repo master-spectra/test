@@ -13,9 +13,8 @@ class Trainer:
             state = self.game_state.get_state_vector()
             base_state = self.base_agent.get_state(self.game_state)
 
-            # Действие базы
             base_action = self.base_agent.get_action(base_state)
-            UnrealInterface.perform_base_action(base_action)
+            UnrealInterface.perform_base_action(base_action)  # Это теперь должно работать
 
             # Действия роботов
             actions = [agent.act(state) for agent in self.agents]
