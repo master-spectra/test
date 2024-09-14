@@ -27,7 +27,8 @@ async def main():
     # Создаем агента базы
     base_state_size = 4  # Количество типов роботов
     base_action_size = 4  # Количество типов роботов, которые может создать база
-    base_agent = BaseAgent(base_state_size, base_action_size)
+    base_actions = ["create_melee", "create_ranged", "create_tank", "create_scout"]
+    base_agent = BaseAgent(base_state_size, base_action_size, base_actions)
 
     agents = [melee_agent, ranged_agent, tank_agent, scout_agent]
     trainer = Trainer(agents, base_agent, game_state, action_space)
