@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+from torch.optim.adam import Adam
 
 class PPOAgent:
     def __init__(self, state_size, action_size):
@@ -24,7 +25,7 @@ class PPOAgent:
             nn.ReLU(),
             nn.Linear(64, 1)
         )
-        self.optimizer = optim.Adam(list(self.actor.parameters()) + list(self.critic.parameters()), lr=0.001)
+        self.optimizer = Adam(list(self.actor.parameters()) + list(self.critic.parameters()), lr=0.001)
 
     def act(self, state):
         state = torch.FloatTensor(state).unsqueeze(0)
