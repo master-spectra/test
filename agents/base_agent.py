@@ -2,9 +2,10 @@ import numpy as np
 import random
 
 class BaseAgent:
-    def __init__(self, state_size, action_size):
+    def __init__(self, state_size, action_size, actions):
         self.state_size = state_size
         self.action_size = action_size
+        self.actions = actions  # Добавляем список действий
         self.q_table = np.zeros((state_size, action_size))
         self.learning_rate = 0.1
         self.discount_factor = 0.95
@@ -36,3 +37,7 @@ class BaseAgent:
         num_scout = sum(1 for robot in game_state.robot_positions if robot.type == 'scout')
 
         return (num_melee, num_ranged, num_tank, num_scout)
+
+    @staticmethod
+    def distance(pos1, pos2):
+        return ((pos1.x - pos2.x)**2 + (pos1.y - pos2.y)**2 + (pos1.z - pos2.z)**2)**0.5
