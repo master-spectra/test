@@ -1,4 +1,5 @@
 import numpy as np
+from utils.unreal_interface import UnrealInterface  # Добавляем импорт
 
 class GameState:
     def __init__(self):
@@ -47,6 +48,7 @@ class GameState:
         self.robot_energy = new_state['robot_energy']
         self.visibility = new_state['visibility']
         self.update_robot_health()
+        self.apply_weather_effects()
 
     def update_robot_health(self):
         for i, robot in enumerate(self.robot_positions):
@@ -54,8 +56,11 @@ class GameState:
                 enemies_in_range = [enemy for enemy in self.enemy_positions
                                     if self.distance(robot, enemy) < 5.0]
                 if not enemies_in_range:
-                    # Если рядом нет врагов, восстанавливаем здоровье
-                    self.robot_health[i] = min(100, self.robot_health[i] + 5)
+                    UnrealInterface.heal_robot(robot)
+
+    def apply_weather_effects(self):
+        for robot in self.robot_positions:
+            UnrealInterface.apply_weather_effects(robot)
 
     def get_state_vector(self):
         state = np.concatenate([
@@ -88,7 +93,7 @@ class GameState:
 
     @staticmethod
     def encode_weather(weather):
-        weathers = ['clear', 'rainy', 'foggy', 'stormy']
+        weathers = ['Clear', 'Rainy', 'Foggy', 'Stormy']
         return weathers.index(weather)
 
     @staticmethod

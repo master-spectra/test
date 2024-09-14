@@ -39,14 +39,19 @@ class BaseAgent:
         return index % (self.state_size ** len(state))
 
     def get_state(self, game_state):
-        # Преобразование game_state в индекс состояния
-        # Это упрощенный пример, вам нужно будет адаптировать его под вашу конкретную ситуацию
         num_melee = sum(1 for robot in game_state.robot_positions if robot.type == 'melee')
         num_ranged = sum(1 for robot in game_state.robot_positions if robot.type == 'ranged')
         num_tank = sum(1 for robot in game_state.robot_positions if robot.type == 'tank')
         num_scout = sum(1 for robot in game_state.robot_positions if robot.type == 'scout')
+        strategic_points_controlled = sum(1 for point in game_state.strategic_points if self.is_point_controlled(point, game_state))
 
-        return (num_melee, num_ranged, num_tank, num_scout)
+        return (num_melee, num_ranged, num_tank, num_scout, strategic_points_controlled)
+
+    def is_point_controlled(self, point, game_state):
+        control_radius = 10.0
+        friendly_robots = sum(1 for robot in game_state.robot_positions if self.distance(robot, point) <= control_radius)
+        enemy_robots = sum(1 for robot in game_state.enemy_positions if self.distance(robot, point) <= control_radius)
+        return friendly_robots > enemy_robots
 
     @staticmethod
     def distance(pos1, pos2):
