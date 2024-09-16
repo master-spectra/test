@@ -1,5 +1,7 @@
 import numpy as np
-from utils.unreal_interface import UnrealInterface  # Добавляем импорт
+
+from utils.unreal_interface import UnrealInterface
+
 
 class GameState:
     def __init__(self):
@@ -24,6 +26,7 @@ class GameState:
         self.collected_resources = 0
         self.robot_energy = []
         self.visibility = 1.0  # 0.0 - 1.0, где 0.0 - полная темнота, 1.0 - полная видимость
+        self.unreal_interface = UnrealInterface()
 
     def update(self, new_state):
         self.robot_positions = new_state['robot_positions']
@@ -56,11 +59,10 @@ class GameState:
                 enemies_in_range = [enemy for enemy in self.enemy_positions
                                     if self.distance(robot, enemy) < 5.0]
                 if not enemies_in_range:
-                    UnrealInterface.heal_robot(robot)
+                    self.unreal_interface.send_command("heal_robot", {"robot_id": i})
 
     def apply_weather_effects(self):
-        for robot in self.robot_positions:
-            UnrealInterface.apply_weather_effects(robot)
+        self.unreal_interface.send_command("apply_weather_effects", {"weather": self.weather})
 
     def get_state_vector(self):
         state = np.concatenate([
@@ -99,3 +101,39 @@ class GameState:
     @staticmethod
     def distance(pos1, pos2):
         return ((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2 + (pos1[2] - pos2[2])**2)**0.5
+
+    def is_game_over(self):
+        return self.base_health <= 0 or self.enemy_base_health <= 0
+
+    def get_reward(self):
+        reward = 0
+        reward += (self.base_health - self.enemy_base_health) * 0.1
+        reward += len(self.robot_positions) - len(self.enemy_positions)
+        reward += self.collected_resources * 0.01
+        return reward
+
+    def add_robot(self, robot_type, position):
+        self.robot_positions.append(position)
+        self.robot_types.append(robot_type)
+        self.robot_health.append(100)  # Начальное здоровье
+        self.robot_energy.append(100)  # Начальная энергия
+
+    def remove_robot(self, index):
+        del self.robot_positions[index]
+        del self.robot_types[index]
+        del self.robot_health[index]
+        del self.robot_energy[index]
+
+    def update_resource(self, resource_index, new_amount):
+        self.resources[resource_index] = new_amount
+
+    def update_visibility(self, new_visibility):
+        self.visibility = max(0.0, min(1.0, new_visibility))
+
+    def update_time_of_day(self):
+        self.time_of_day = (self.time_of_day + 1) % 24
+        # Обновляем видимость в зависимости от времени суток
+        if 6 <= self.time_of_day < 18:
+            self.visibility = 1.0
+        else:
+            self.visibility = 0.5
