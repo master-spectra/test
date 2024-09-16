@@ -10,7 +10,7 @@ class Trainer:
         self.agents = {}
 
     async def train_episode(self, max_steps):
-        for step in range(max_steps):
+        for step in range(max_steps):  #TODO Возможно тут нужно использовать step
             game_state = await self.unreal_interface.get_game_state()
 
             for agent_id, agent_state in game_state['agents'].items():
