@@ -1,70 +1,69 @@
 import json
-import socket
-import struct
 from threading import Thread
-from typing import Any, Dict, List, Optional
 
 import numpy as np
+import zmq
+
+from environment.action_space import ActionSpace
+from environment.game_state import GameState
+from models.reinforcement_learning import PPOAgent
 
 
 class UnrealInterface:
-    def __init__(self, host: str = 'localhost', port: int = 8000):
-        self.host = host
-        self.port = port
-        self.sock: Optional[socket.socket] = None
-        self.connection: Optional[socket.socket] = None
-        self.listening_thread: Optional[Thread] = None
+    def __init__(self, host='localhost', port=5555):
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.PAIR)
+        self.socket.bind(f"tcp://{host}:{port}")
         self.running = False
-        self.agents: Dict[int, Any] = {}  # Здесь Any используется вместо PPOAgent, так как мы не импортируем его напрямую
+        self.listening_thread = None
+        self.agents = {}
+        self.action_space = ActionSpace()
+        self.game_state = GameState()
 
-    def start(self) -> None:
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.bind((self.host, self.port))
-        self.sock.listen(1)
-        print(f"Waiting for connection on {self.host}:{self.port}...")
-        self.connection, address = self.sock.accept()
-        print(f"Connected by {address}")
+    def start(self):
         self.running = True
         self.listening_thread = Thread(target=self.listen_for_messages)
         self.listening_thread.start()
 
-    def stop(self) -> None:
+    def stop(self):
         self.running = False
-        if self.connection:
-            self.connection.close()
-        if self.sock:
-            self.sock.close()
         if self.listening_thread:
             self.listening_thread.join()
+        self.socket.close()
+        self.context.term()
 
-    def listen_for_messages(self) -> None:
+    def listen_for_messages(self):
         while self.running:
             try:
-                message = self.receive_data()
-                if message:
-                    self.handle_message(message)
-            except Exception as e:
-                print(f"Error in listening thread: {e}")
+                message = self.socket.recv_json()
+                self.handle_message(message)
+            except zmq.ZMQError:
+                if self.running:
+                    print("Error in listening thread")
                 break
 
-    def handle_message(self, message: Dict[str, Any]) -> None:
+    def handle_message(self, message):
         if message['command'] == 'get_action':
             action = self.get_ai_action(message['data']['agent_id'], message['data']['state'])
             self.send_command('action', {'agent_id': message['data']['agent_id'], 'action': action})
         elif message['command'] == 'update_state':
             self.update_game_state(message['data']['agent_id'], message['data']['state'], message['data']['reward'], message['data']['done'])
 
-    def send_game_state(self, game_state: Dict[str, Any]) -> None:
-        state_vector = self.game_state_to_vector(game_state)
-        self.send_command("update_state", {"state": state_vector.tolist()})
+    def send_command(self, command, data=None):
+        message = json.dumps({"command": command, "data": data})
+        self.socket.send_json(message)
 
-    def get_ai_action(self, agent_id: int, state: List[float]) -> int:
+    def get_ai_action(self, agent_id, state):
         if agent_id not in self.agents:
-            # Создание нового агента должно быть реализовано здесь
-            pass
-        return int(self.agents[agent_id].act(np.array(state)))  # Явное приведение к int
+            self.agents[agent_id] = self.create_agent(agent_id, state)
+        return int(self.agents[agent_id].act(np.array(state)))
 
-    def update_game_state(self, agent_id: int, state: List[float], reward: float, done: bool) -> None:
+    def create_agent(self, agent_id, state):
+        state_size = len(state)
+        action_size = self.action_space.get_action_size()
+        return PPOAgent(state_size, action_size)
+
+    def update_game_state(self, agent_id, state, reward, done):
         if agent_id in self.agents:
             self.agents[agent_id].train(
                 states=np.array([state]),
@@ -73,56 +72,49 @@ class UnrealInterface:
                 next_states=np.array([state]),
                 dones=np.array([done])
             )
-
-    def send_command(self, command: str, data: Optional[Dict[str, Any]] = None) -> None:
-        message = json.dumps({"command": command, "data": data}).encode()
-        if self.connection:
-            self.connection.sendall(struct.pack('>I', len(message)) + message)
-        else:
-            print("Error: No connection established")
-
-    def receive_data(self) -> Optional[Dict[str, Any]]:
-        if not self.connection:
-            return None
-        raw_msglen = self.recvall(4)
-        if not raw_msglen:
-            return None
-        msglen = struct.unpack('>I', raw_msglen)[0]
-        data = self.recvall(msglen)
-        if data:
-            return json.loads(data.decode())
-        return None
-
-    def recvall(self, n: int) -> Optional[bytes]:
-        if not self.connection:
-            return None
-        data = bytearray()
-        while len(data) < n:
-            packet = self.connection.recv(n - len(data))
-            if not packet:
-                return None
-            data.extend(packet)
-        return bytes(data)
+        self.game_state.update(self.vector_to_game_state(state))
 
     @staticmethod
-    def game_state_to_vector(game_state: Dict[str, Any]) -> np.ndarray:
+    def game_state_to_vector(game_state):
         return np.array([
-            game_state['robot_positions'],
-            game_state['robot_health'],
-            game_state['enemy_positions'],
-            game_state['enemy_health'],
-            game_state['base_health'],
-            game_state['enemy_base_health'],
-            game_state['resources'],
-            game_state['obstacles'],
-            game_state['time_of_day'],
-            game_state['weather']
+            game_state.robot_positions,
+            game_state.robot_health,
+            game_state.enemy_positions,
+            game_state.enemy_health,
+            game_state.base_health,
+            game_state.enemy_base_health,
+            game_state.resources,
+            game_state.obstacles,
+            game_state.time_of_day,
+            game_state.weather
         ]).flatten()
+
+    def vector_to_game_state(self, vector):
+        # Предполагаем, что порядок элементов в векторе соответствует порядку в game_state_to_vector
+        new_state = {}
+        start = 0
+        for key in ['robot_positions', 'robot_health', 'enemy_positions', 'enemy_health']:
+            end = start + len(getattr(self.game_state, key))
+            new_state[key] = vector[start:end].tolist()
+            start = end
+        for key in ['base_health', 'enemy_base_health']:
+            new_state[key] = vector[start]
+            start += 1
+        for key in ['resources', 'obstacles']:
+            end = start + len(getattr(self.game_state, key))
+            new_state[key] = vector[start:end].tolist()
+            start = end
+        new_state['time_of_day'] = vector[start]
+        new_state['weather'] = vector[start + 1]
+        return new_state
 
 if __name__ == "__main__":
     interface = UnrealInterface()
     try:
         interface.start()
+        print("Interface started. Press Ctrl+C to stop.")
+        while True:
+            pass
     except KeyboardInterrupt:
         print("Stopping the interface...")
     finally:

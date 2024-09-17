@@ -1,8 +1,7 @@
 #include "PythonBridge.h"
-#include "Serialization/ArrayReader.h"
-#include "Serialization/ArrayWriter.h"
+#include "Json.h"
 
-APythonBridge::APythonBridge()
+APythonBridge::APythonBridge() : Context(1), Socket(Context, zmq::socket_type::pair)
 {
     PrimaryActorTick.bCanEverTick = true;
 }
@@ -10,144 +9,117 @@ APythonBridge::APythonBridge()
 void APythonBridge::BeginPlay()
 {
     Super::BeginPlay();
-
-    if (Connect())
-    {
-        Listener = new FSocketListener(this);
-        ListenerThread = FRunnableThread::Create(Listener, TEXT("PythonBridgeListener"));
-    }
+    Connect();
 }
 
 void APythonBridge::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     Super::EndPlay(EndPlayReason);
-
-    if (Listener)
-    {
-        Listener->Stop();
-        ListenerThread->WaitForCompletion();
-        delete Listener;
-        delete ListenerThread;
-    }
-
     Disconnect();
 }
 
 bool APythonBridge::Connect()
 {
-    ISocketSubsystem *SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-    Socket = SocketSubsystem->CreateSocket(NAME_Stream, TEXT("PythonConnection"), false);
-
-    RemoteEndpoint = FIPv4Endpoint(FIPv4Address(127, 0, 0, 1), 8000);
-    return Socket->Connect(*RemoteEndpoint.ToInternetAddr());
+    try
+    {
+        Socket.connect("tcp://localhost:5555");
+        return true;
+    }
+    catch (zmq::error_t &e)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to connect to Python: %s"), UTF8_TO_TCHAR(e.what()));
+        return false;
+    }
 }
 
 void APythonBridge::Disconnect()
 {
-    if (Socket)
-    {
-        Socket->Close();
-        ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(Socket);
-        Socket = nullptr;
-    }
+    Socket.close();
 }
 
 void APythonBridge::SendGameState(const TArray<float> &GameState)
 {
-    FBufferArchive SendBuffer;
-    SendBuffer << GameState;
+    TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+    JsonObject->SetStringField("command", "update_state");
 
-    TArray<uint8> SendData;
-    SendBuffer.GetUnsafeData(SendData);
+    TSharedPtr<FJsonObject> DataObject = MakeShareable(new FJsonObject);
+    TArray<TSharedPtr<FJsonValue>> StateArray;
+    for (float Value : GameState)
+    {
+        StateArray.Add(MakeShareable(new FJsonValueNumber(Value)));
+    }
+    DataObject->SetArrayField("state", StateArray);
 
-    SendData(SendData);
+    JsonObject->SetObjectField("data", DataObject);
+
+    FString JsonString;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
+    FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
+
+    SendMessage(JsonString);
 }
 
 int32 APythonBridge::GetAIAction(int32 AgentID)
 {
-    TArray<uint8> SendData;
-    FMemoryWriter Writer(SendData);
-    Writer << AgentID;
+    TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+    JsonObject->SetStringField("command", "get_action");
 
-    if (SendData(SendData))
+    TSharedPtr<FJsonObject> DataObject = MakeShareable(new FJsonObject);
+    DataObject->SetNumberField("agent_id", AgentID);
+
+    JsonObject->SetObjectField("data", DataObject);
+
+    FString JsonString;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
+    FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
+
+    if (SendMessage(JsonString))
     {
-        TArray<uint8> ReceivedData;
-        if (ReceiveData(ReceivedData))
+        FString Response;
+        if (ReceiveMessage(Response))
         {
-            FMemoryReader Reader(ReceivedData);
-            int32 Action;
-            Reader << Action;
-            return Action;
+            TSharedPtr<FJsonObject> ResponseObject;
+            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response);
+            if (FJsonSerializer::Deserialize(Reader, ResponseObject))
+            {
+                return ResponseObject->GetIntegerField("action");
+            }
         }
     }
 
     return -1; // Error value
 }
 
-bool APythonBridge::SendData(const TArray<uint8> &Data)
+bool APythonBridge::SendMessage(const FString &Message)
 {
-    int32 BytesSent = 0;
-    return Socket->Send(Data.GetData(), Data.Num(), BytesSent);
-}
-
-bool APythonBridge::ReceiveData(TArray<uint8> &Data)
-{
-    uint32 Size;
-    int32 BytesRead = 0;
-
-    if (Socket->Recv(reinterpret_cast<uint8 *>(&Size), sizeof(uint32), BytesRead))
+    try
     {
-        if (BytesRead == sizeof(uint32))
-        {
-            Data.SetNumUninitialized(Size);
-            BytesRead = 0;
-            return Socket->Recv(Data.GetData(), Size, BytesRead);
-        }
+        zmq::message_t ZmqMessage(Message.Len());
+        FMemory::Memcpy(ZmqMessage.data(), TCHAR_TO_UTF8(*Message), Message.Len());
+        return Socket.send(ZmqMessage, zmq::send_flags::none);
     }
-
-    return false;
-}
-
-APythonBridge::FSocketListener::FSocketListener(APythonBridge *InOwner)
-    : Owner(InOwner), Thread(nullptr), bShouldRun(false)
-{
-}
-
-bool APythonBridge::FSocketListener::Init()
-{
-    bShouldRun = true;
-    return true;
-}
-
-uint32 APythonBridge::FSocketListener::Run()
-{
-    while (bShouldRun)
+    catch (zmq::error_t &e)
     {
-        TArray<uint8> ReceivedData;
-        if (Owner->ReceiveData(ReceivedData))
-        {
-            EnqueueData(ReceivedData);
-        }
-
-        FPlatformProcess::Sleep(0.01f);
+        UE_LOG(LogTemp, Error, TEXT("Failed to send message: %s"), UTF8_TO_TCHAR(e.what()));
+        return false;
     }
-
-    return 0;
 }
 
-void APythonBridge::FSocketListener::Stop()
+bool APythonBridge::ReceiveMessage(FString &Message)
 {
-    bShouldRun = false;
-}
-
-void APythonBridge::FSocketListener::EnqueueData(const TArray<uint8> &Data)
-{
-    FScopeLock Lock(&QueueLock);
-    DataQueue.Enqueue(Data);
-}
-
-bool APythonBridge::FSocketListener::DequeueData(TArray<uint8> &OutData)
-{
-    FScopeLock Lock(&QueueLock);
-    return DataQueue.Dequeue(OutData);
+    try
+    {
+        zmq::message_t ZmqMessage;
+        if (Socket.recv(ZmqMessage, zmq::recv_flags::none))
+        {
+            Message = FString(UTF8_TO_TCHAR(static_cast<char *>(ZmqMessage.data())));
+            return true;
+        }
+        return false;
+    }
+    catch (zmq::error_t &e)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to receive message: %s"), UTF8_TO_TCHAR(e.what()));
+        return false;
+    }
 }

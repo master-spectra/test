@@ -2,10 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Networking.h"
-#include "HAL/Runnable.h"
-#include "HAL/RunnableThread.h"
-#include "Containers/Queue.h"
+#include "zmq.hpp"
 #include "PythonBridge.generated.h"
 
 UCLASS()
@@ -25,33 +22,11 @@ public:
     int32 GetAIAction(int32 AgentID);
 
 private:
-    FSocket *Socket;
-    FIPv4Endpoint RemoteEndpoint;
+    zmq::context_t Context;
+    zmq::socket_t Socket;
 
     bool Connect();
     void Disconnect();
-
-    bool SendData(const TArray<uint8> &Data);
-    bool ReceiveData(TArray<uint8> &Data);
-
-    class FSocketListener : public FRunnable
-    {
-    public:
-        FSocketListener(APythonBridge *InOwner);
-        virtual bool Init() override;
-        virtual uint32 Run() override;
-        virtual void Stop() override;
-        void EnqueueData(const TArray<uint8> &Data);
-        bool DequeueData(TArray<uint8> &OutData);
-
-    private:
-        APythonBridge *Owner;
-        FRunnableThread *Thread;
-        bool bShouldRun;
-        FCriticalSection QueueLock;
-        TQueue<TArray<uint8>> DataQueue;
-    };
-
-    FSocketListener *Listener;
-    FRunnableThread *ListenerThread;
+    bool SendMessage(const FString &Message);
+    bool ReceiveMessage(FString &Message);
 };
